@@ -98,14 +98,13 @@ async def receive_channel_input(update: Update, context: ContextTypes.DEFAULT_TY
     
     try:
         # Check if it's a forwarded message from channel
-        if message.forward_origin:
-            # New API: forward_origin instead of forward_from_chat
-            if hasattr(message.forward_origin, 'chat'):
-                forward_chat = message.forward_origin.chat
-                if forward_chat.type == 'channel':
-                    channel_id = forward_chat.id
-                    channel_title = forward_chat.title
-        
+        # Check if it's a forwarded message from a channel
+        if message.forward_from_chat:
+            forward_chat = message.forward_from_chat
+            if forward_chat.type == 'channel':
+                channel_id = forward_chat.id
+                channel_title = forward_chat.title
+                
         # Check if it's a username or ID
         elif message.text:
             text = message.text.strip()
