@@ -8,7 +8,7 @@ BOT_TOKEN = os.getenv('BOT_TOKEN', '7008031473:AAH-ZLZXr5vM2X_0rdMcdSRsfRwG6zzqv
 
 # MongoDB Configuration
 MONGODB_URL = os.getenv('MONGODB_URL', 'mongodb+srv://villainravangaming:mikey_kun_781_@cluster0.fbgs1zz.mongodb.net/?retryWrites=true&w=majority')
-DATABASE_NAME = 'telegram_post_bot1'
+DATABASE_NAME = 'telegram_post_bot'
 
 # Collections
 POSTS_COLLECTION = 'posts'
@@ -21,3 +21,4 @@ MORE_CHANNELS_LINK = 'https://t.me/Linkz_Wallah/2'
 # Admin User ID (optional - for admin features)
 
 ADMIN_USER_ID = 5706788169  # Set your Telegram user ID here
+
