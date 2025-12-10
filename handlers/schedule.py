@@ -12,9 +12,10 @@ from utils import (
     format_datetime
 )
 from datetime import datetime
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 # Conversation states
-AWAIT_CUSTOM_TIME = range(1)
+AWAIT_CUSTOM_TIME, SELECT_CHANNELS = range(2)
 
 async def schedule_new_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start scheduling a new post"""
@@ -58,7 +59,10 @@ async def schedule_next_hour(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     
     scheduled_time = get_next_hour()
-    await save_scheduled_post(update, context, scheduled_time)
+    context.user_data['scheduled_time'] = scheduled_time
+    
+    # Now show channel selection
+    return await show_channel_selection(update, context)
 
 
 async def schedule_2_hours(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -67,7 +71,10 @@ async def schedule_2_hours(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     scheduled_time = get_time_offset(2)
-    await save_scheduled_post(update, context, scheduled_time)
+    context.user_data['scheduled_time'] = scheduled_time
+    
+    # Now show channel selection
+    return await show_channel_selection(update, context)
 
 
 async def schedule_6_hours(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -76,7 +83,10 @@ async def schedule_6_hours(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     scheduled_time = get_time_offset(6)
-    await save_scheduled_post(update, context, scheduled_time)
+    context.user_data['scheduled_time'] = scheduled_time
+    
+    # Now show channel selection
+    return await show_channel_selection(update, context)
 
 
 async def schedule_custom_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -119,8 +129,181 @@ async def receive_custom_time(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return AWAIT_CUSTOM_TIME
     
-    await save_scheduled_post(update, context, scheduled_time)
+    context.user_data['scheduled_time'] = scheduled_time
+    
+    # Now show channel selection
+    return await show_channel_selection(update, context)
+
+
+async def show_channel_selection(update, context):
+    """Show channel selection for scheduling"""
+    user_id = update.effective_user.id
+    user_settings = db.get_user_settings(user_id)
+    channels = user_settings.get('channels', [])
+    
+    if not channels:
+        msg = "❌ *No channels found\\!*\n\nPlease add channels first:\nSettings → Manage Channels"
+        
+        if hasattr(update, 'callback_query'):
+            await update.callback_query.edit_message_text(
+                msg,
+                reply_markup=back_to_main_keyboard(),
+                parse_mode='MarkdownV2'
+            )
+        else:
+            await update.message.reply_text(
+                msg,
+                reply_markup=back_to_main_keyboard(),
+                parse_mode='MarkdownV2'
+            )
+        return ConversationHandler.END
+    
+    # Initialize selected channels list
+    if 'selected_channels' not in context.user_data:
+        context.user_data['selected_channels'] = []
+    
+    # Create channel selection keyboard
+    keyboard = []
+    for channel in channels:
+        ch_id = channel['id']
+        ch_title = channel.get('title', 'Unknown')
+        
+        # Check if selected
+        is_selected = ch_id in context.user_data['selected_channels']
+        emoji = "✅" if is_selected else "⬜"
+        
+        keyboard.append([InlineKeyboardButton(
+            f"{emoji} {ch_title}",
+            callback_data=f"toggle_schedule_ch_{ch_id}"
+        )])
+    
+    # Add action buttons
+    keyboard.append([InlineKeyboardButton("✅ Confirm Selection", callback_data="confirm_schedule_channels")])
+    keyboard.append([InlineKeyboardButton("🔙 Cancel", callback_data="cancel_schedule")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    selected_count = len(context.user_data['selected_channels'])
+    msg = f"📢 *Select Channels for Posting*\n\nSelected: {selected_count}/{len(channels)}\n\nTap to select/deselect:"
+    
+    if hasattr(update, 'callback_query'):
+        try:
+            await update.callback_query.edit_message_text(
+                msg,
+                reply_markup=reply_markup,
+                parse_mode='MarkdownV2'
+            )
+        except:
+            await update.callback_query.message.reply_text(
+                msg,
+                reply_markup=reply_markup,
+                parse_mode='MarkdownV2'
+            )
+    else:
+        await update.message.reply_text(
+            msg,
+            reply_markup=reply_markup,
+            parse_mode='MarkdownV2'
+        )
+    
+    return SELECT_CHANNELS
+
+
+async def toggle_schedule_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Toggle channel selection"""
+    query = update.callback_query
+    await query.answer()
+    
+    # Extract channel ID
+    channel_id = int(query.data.replace('toggle_schedule_ch_', ''))
+    
+    # Toggle selection
+    if 'selected_channels' not in context.user_data:
+        context.user_data['selected_channels'] = []
+    
+    if channel_id in context.user_data['selected_channels']:
+        context.user_data['selected_channels'].remove(channel_id)
+    else:
+        context.user_data['selected_channels'].append(channel_id)
+    
+    # Refresh UI
+    return await show_channel_selection(update, context)
+
+
+async def confirm_schedule_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Confirm channel selection and save schedule"""
+    query = update.callback_query
+    await query.answer()
+    
+    selected_channels = context.user_data.get('selected_channels', [])
+    
+    if not selected_channels:
+        await query.answer("⚠️ Please select at least one channel!", show_alert=True)
+        return SELECT_CHANNELS
+    
+    scheduled_time = context.user_data.get('scheduled_time')
+    
+    if not scheduled_time:
+        await query.edit_message_text(
+            "❌ Error: Time not set. Please try again.",
+            reply_markup=back_to_main_keyboard()
+        )
+        return ConversationHandler.END
+    
+    # Save scheduled post
+    await save_scheduled_post_with_channels(update, context, scheduled_time, selected_channels)
+    
     return ConversationHandler.END
+
+
+async def save_scheduled_post_with_channels(update, context, scheduled_time, channel_ids):
+    """Save scheduled post with selected channels"""
+    post_data = context.user_data.get('post_data', {})
+    post_type = context.user_data.get('post_type')
+    generated_text = context.user_data.get('generated_text')
+    user_id = update.effective_user.id
+    
+    # Prepare schedule data
+    schedule_data = {
+        'user_id': user_id,
+        'post_type': post_type,
+        'post_data': post_data,
+        'generated_text': generated_text,
+        'scheduled_time': scheduled_time,
+        'channel_ids': channel_ids,
+        'status': 'pending'
+    }
+    
+    # Save to database
+    result = db.save_scheduled_post(schedule_data)
+    
+    from templates.post_templates import escape_markdown
+    time_str = format_datetime(scheduled_time)
+    ch_count = len(channel_ids)
+    
+    success_msg = f"""✅ *Post Scheduled Successfully\\!*
+
+📅 Time: {escape_markdown(time_str)}
+📝 Type: {post_type}
+📢 Channels: {ch_count}
+
+Will post automatically\\."""
+    
+    if hasattr(update, 'callback_query'):
+        await update.callback_query.edit_message_text(
+            success_msg,
+            reply_markup=back_to_main_keyboard(),
+            parse_mode='MarkdownV2'
+        )
+    else:
+        await update.message.reply_text(
+            success_msg,
+            reply_markup=back_to_main_keyboard(),
+            parse_mode='MarkdownV2'
+        )
+    
+    # Clear user data
+    context.user_data.clear()
 
 
 async def save_scheduled_post(update, context, scheduled_time):
@@ -128,43 +311,72 @@ async def save_scheduled_post(update, context, scheduled_time):
     post_data = context.user_data.get('post_data', {})
     post_type = context.user_data.get('post_type')
     generated_text = context.user_data.get('generated_text')
+    user_id = update.effective_user.id
+    
+    # Get user's channels
+    user_settings = db.get_user_settings(user_id)
+    channels = user_settings.get('channels', [])
+    
+    if not channels:
+        msg = """❌ *No channels found\\!*
+
+Please add channels first:
+Settings → Manage Channels"""
+        
+        if hasattr(update, 'callback_query'):
+            await update.callback_query.edit_message_text(
+                msg,
+                reply_markup=back_to_main_keyboard(),
+                parse_mode='MarkdownV2'
+            )
+        else:
+            await update.message.reply_text(
+                msg,
+                reply_markup=back_to_main_keyboard(),
+                parse_mode='MarkdownV2'
+            )
+        return ConversationHandler.END
+    
+    # Use all channels by default (you can add channel selection UI later)
+    channel_ids = [ch['id'] for ch in channels]
     
     # Prepare schedule data
     schedule_data = {
-        'user_id': update.effective_user.id,
+        'user_id': user_id,
         'post_type': post_type,
         'post_data': post_data,
         'generated_text': generated_text,
         'scheduled_time': scheduled_time,
-        'channel_ids': [],  # TODO: Add channel selection
+        'channel_ids': channel_ids,
         'status': 'pending'
     }
     
     # Save to database
     result = db.save_scheduled_post(schedule_data)
     
-    success_msg = f"""
-✅ **Post Scheduled Successfully!**
+    from templates.post_templates import escape_markdown
+    time_str = format_datetime(scheduled_time)
+    ch_count = len(channel_ids)
+    
+    success_msg = f"""✅ *Post Scheduled Successfully\\!*
 
-📅 **Scheduled Time:** {format_datetime(scheduled_time)}
-📝 **Type:** {post_type}
+📅 Time: {escape_markdown(time_str)}
+📝 Type: {post_type}
+📢 Channels: {ch_count}
 
-Your post will be automatically published at the scheduled time.
-
-You can view/edit this in the Dashboard.
-"""
+Will post automatically\\."""
     
     if hasattr(update, 'callback_query'):
         await update.callback_query.edit_message_text(
             success_msg,
             reply_markup=back_to_main_keyboard(),
-            parse_mode='Markdown'
+            parse_mode='MarkdownV2'
         )
     else:
         await update.message.reply_text(
             success_msg,
             reply_markup=back_to_main_keyboard(),
-            parse_mode='Markdown'
+            parse_mode='MarkdownV2'
         )
     
     # Clear user data
@@ -194,6 +406,10 @@ def register_schedule_handlers(application):
     application.add_handler(CallbackQueryHandler(schedule_2_hours, pattern="^schedule_2_hours$"))
     application.add_handler(CallbackQueryHandler(schedule_6_hours, pattern="^schedule_6_hours$"))
     
+    # Channel selection
+    application.add_handler(CallbackQueryHandler(toggle_schedule_channel, pattern="^toggle_schedule_ch_"))
+    application.add_handler(CallbackQueryHandler(confirm_schedule_channels, pattern="^confirm_schedule_channels$"))
+    
     # Custom time conversation
     conv_handler = ConversationHandler(
         entry_points=[
@@ -202,6 +418,10 @@ def register_schedule_handlers(application):
         states={
             AWAIT_CUSTOM_TIME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_custom_time)
+            ],
+            SELECT_CHANNELS: [
+                CallbackQueryHandler(toggle_schedule_channel, pattern="^toggle_schedule_ch_"),
+                CallbackQueryHandler(confirm_schedule_channels, pattern="^confirm_schedule_channels$"),
             ],
         },
         fallbacks=[
