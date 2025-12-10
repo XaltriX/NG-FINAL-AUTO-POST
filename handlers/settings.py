@@ -108,13 +108,28 @@ async def receive_channel_input(update: Update, context: ContextTypes.DEFAULT_TY
     
     try:
         # Check if it's a forwarded message from channel
-        if message.forward_origin:
-            # New API: forward_origin instead of forward_from_chat
+        # Try multiple attributes for different PTB versions
+        forward_chat = None
+        
+        # Method 1: forward_origin (PTB 20.7+)
+        if hasattr(message, 'forward_origin') and message.forward_origin:
             if hasattr(message.forward_origin, 'chat'):
                 forward_chat = message.forward_origin.chat
-                if forward_chat.type == 'channel':
-                    channel_id = forward_chat.id
-                    channel_title = forward_chat.title
+        
+        # Method 2: forward_from_chat (older versions)
+        elif hasattr(message, 'forward_from_chat') and message.forward_from_chat:
+            forward_chat = message.forward_from_chat
+        
+        # Method 3: Check if message has forward_date (any forwarded message)
+        elif hasattr(message, 'forward_date') and message.forward_date:
+            # Try to get chat from sender_chat
+            if hasattr(message, 'sender_chat') and message.sender_chat:
+                forward_chat = message.sender_chat
+        
+        # If we found a forwarded chat
+        if forward_chat and forward_chat.type == 'channel':
+            channel_id = forward_chat.id
+            channel_title = forward_chat.title
         
         # Check if it's a username or ID
         elif message.text:
@@ -129,11 +144,10 @@ async def receive_channel_input(update: Update, context: ContextTypes.DEFAULT_TY
                         channel_title = chat.title
                 except Exception as e:
                     await message.reply_text(
-                        f"❌ *Error:* Channel not found or bot is not admin\\.\n\n"
+                        f"❌ Error: Channel not found or bot is not admin.\n\n"
                         f"Make sure:\n"
-                        f"1\\. Bot is admin in the channel\n"
-                        f"2\\. Channel username is correct",
-                        parse_mode='MarkdownV2'
+                        f"1. Bot is admin in the channel\n"
+                        f"2. Channel username is correct"
                     )
                     return AWAIT_CHANNEL_INPUT
             
@@ -147,19 +161,17 @@ async def receive_channel_input(update: Update, context: ContextTypes.DEFAULT_TY
                         channel_title = chat.title
                 except Exception as e:
                     await message.reply_text(
-                        f"❌ *Error:* Invalid channel ID or bot is not admin\\.",
-                        parse_mode='MarkdownV2'
+                        f"❌ Error: Invalid channel ID or bot is not admin."
                     )
                     return AWAIT_CHANNEL_INPUT
         
         if not channel_id:
             await message.reply_text(
-                "❌ *Invalid input\\!*\n\n"
+                "❌ Invalid input!\n\n"
                 "Please send:\n"
-                "• Channel username \\(@channel\\)\n"
-                "• Channel ID \\(\\-100xxx\\)\n"
-                "• Forward a message from channel",
-                parse_mode='MarkdownV2'
+                "• Channel username (@channel)\n"
+                "• Channel ID (-100xxx)\n"
+                "• Forward a message from channel"
             )
             return AWAIT_CHANNEL_INPUT
         
@@ -167,9 +179,8 @@ async def receive_channel_input(update: Update, context: ContextTypes.DEFAULT_TY
         bot_member = await context.bot.get_chat_member(channel_id, context.bot.id)
         if bot_member.status not in ['administrator', 'creator']:
             await message.reply_text(
-                "❌ *Bot is not admin in this channel\\!*\n\n"
-                "Please make the bot admin first\\.",
-                parse_mode='MarkdownV2'
+                "❌ Bot is not admin in this channel!\n\n"
+                "Please make the bot admin first."
             )
             return AWAIT_CHANNEL_INPUT
         
@@ -180,9 +191,8 @@ async def receive_channel_input(update: Update, context: ContextTypes.DEFAULT_TY
         # Check if channel already exists
         if any(ch['id'] == channel_id for ch in channels):
             await message.reply_text(
-                "ℹ️ *Channel already added\\!*",
-                reply_markup=back_to_main_keyboard(),
-                parse_mode='MarkdownV2'
+                "ℹ️ Channel already added!",
+                reply_markup=back_to_main_keyboard()
             )
             return ConversationHandler.END
         
@@ -195,12 +205,11 @@ async def receive_channel_input(update: Update, context: ContextTypes.DEFAULT_TY
         db.update_user_settings(user_id, {'channels': channels})
         
         await message.reply_text(
-            f"✅ *Channel Added Successfully\\!*\n\n"
-            f"*Title:* {channel_title}\n"
-            f"*ID:* `{channel_id}`\n\n"
-            f"You can now post to this channel\\.",
-            reply_markup=back_to_main_keyboard(),
-            parse_mode='MarkdownV2'
+            f"✅ Channel Added Successfully!\n\n"
+            f"Title: {channel_title}\n"
+            f"ID: {channel_id}\n\n"
+            f"You can now post to this channel.",
+            reply_markup=back_to_main_keyboard()
         )
         
         return ConversationHandler.END
@@ -208,12 +217,11 @@ async def receive_channel_input(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         logger.error(f"Error adding channel: {e}")
         await message.reply_text(
-            "❌ *Error adding channel\\!*\n\n"
+            "❌ Error adding channel!\n\n"
             "Please make sure:\n"
-            "1\\. Bot is admin in the channel\n"
-            "2\\. You sent correct channel info",
-            reply_markup=back_to_main_keyboard(),
-            parse_mode='MarkdownV2'
+            "1. Bot is admin in the channel\n"
+            "2. You sent correct channel info",
+            reply_markup=back_to_main_keyboard()
         )
         return ConversationHandler.END
 
