@@ -62,35 +62,34 @@ async def manage_channels_callback(update: Update, context: ContextTypes.DEFAULT
     user_settings = db.get_user_settings(user_id)
     channels = user_settings.get('channels', [])
     
-    channel_list = ""
+    # Build message without markdown to avoid escape issues
     if channels:
-        channel_list = "\n\n*Your Channels:*\n"
+        channel_list = "\n\nYour Channels:\n"
         for i, channel in enumerate(channels, 1):
             ch_title = channel.get('title', 'Unknown')
             ch_id = str(channel['id'])
-            channel_list += f"{i}\\. {ch_title} \\(`{ch_id}`\\)\n"
+            channel_list += f"{i}. {ch_title} ({ch_id})\n"
     else:
-        channel_list = "\n\nNo channels added yet\\."
+        channel_list = "\n\nNo channels added yet."
     
-    msg_text = f"""📢 *Channel Management*
+    msg_text = f"""📢 Channel Management
 {channel_list}
 
-*How to add:*
-1\\. Make bot admin in channel
-2\\. Send @channel or \\-100xxx
-3\\. Or forward message
+How to add:
+1. Make bot admin in channel
+2. Send @channel or -100xxx
+3. Or forward message
 
 Send channel info now:"""
     
     try:
         await query.edit_message_text(
             msg_text,
-            reply_markup=back_to_main_keyboard(),
-            parse_mode='MarkdownV2'
+            reply_markup=back_to_main_keyboard()
         )
     except Exception as e:
         logger.error(f"Error in manage_channels: {e}")
-        # Fallback without markdown
+        # Fallback
         await query.message.reply_text(
             "📢 Channel Management\n\nSend channel username (@channel) or ID (-100xxx):",
             reply_markup=back_to_main_keyboard()
