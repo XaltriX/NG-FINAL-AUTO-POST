@@ -1,5 +1,8 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from telegram.error import TelegramError
+
+# IST Timezone (UTC+5:30)
+IST = timezone(timedelta(hours=5, minutes=30))
 
 async def get_channel_list(context, user_id):
     """Get list of channels where bot is admin"""
@@ -21,20 +24,26 @@ async def get_post_views(context, chat_id, message_id):
 
 
 def format_datetime(dt):
-    """Format datetime for display"""
-    return dt.strftime('%d/%m/%Y %H:%M')
+    """Format datetime for display in IST"""
+    if dt.tzinfo is None:
+        # If naive datetime, assume it's IST
+        dt = dt.replace(tzinfo=IST)
+    else:
+        # Convert to IST
+        dt = dt.astimezone(IST)
+    return dt.strftime('%d/%m/%Y %H:%M IST')
 
 
 def get_next_hour():
-    """Get next hour datetime"""
-    now = datetime.now()
+    """Get next hour datetime in IST"""
+    now = datetime.now(IST)
     next_hour = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
     return next_hour
 
 
 def get_time_offset(hours):
-    """Get datetime with offset"""
-    return datetime.now() + timedelta(hours=hours)
+    """Get datetime with offset in IST"""
+    return datetime.now(IST) + timedelta(hours=hours)
 
 
 def truncate_text(text, max_length=50):
