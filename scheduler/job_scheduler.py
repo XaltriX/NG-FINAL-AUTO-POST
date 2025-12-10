@@ -36,19 +36,28 @@ class PostScheduler:
             IST = timezone(timedelta(hours=5, minutes=30))
             current_time = datetime.now(IST)
             
+            logger.info(f"⏰ Current IST time: {current_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+            
             for post in pending_posts:
                 scheduled_time = post['scheduled_time']
                 
                 # Make sure scheduled_time has timezone
                 if scheduled_time.tzinfo is None:
+                    # If naive, assume it's IST
                     scheduled_time = scheduled_time.replace(tzinfo=IST)
+                    logger.info(f"📅 Post scheduled (naive→IST): {scheduled_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
                 else:
+                    # Convert to IST for comparison
                     scheduled_time = scheduled_time.astimezone(IST)
+                    logger.info(f"📅 Post scheduled (converted): {scheduled_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
                 
                 # Check if it's time to post
                 if current_time >= scheduled_time:
-                    logger.info(f"⏰ Time to post: {post['_id']}")
+                    logger.info(f"⏰ Time to post NOW: {post['_id']}")
                     await self.publish_scheduled_post(post)
+                else:
+                    time_diff = (scheduled_time - current_time).total_seconds() / 60
+                    logger.info(f"⏳ Post {post['_id']} will post in {time_diff:.1f} minutes")
         
         except Exception as e:
             logger.error(f"❌ Error checking pending posts: {e}", exc_info=True)
