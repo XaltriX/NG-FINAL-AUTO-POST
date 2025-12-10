@@ -30,10 +30,20 @@ class PostScheduler:
             logger.info("🔍 Checking pending scheduled posts...")
             pending_posts = db.get_pending_scheduled_posts()
             logger.info(f"📌 Found {len(pending_posts)} pending posts")
-            current_time = datetime.now()
+            
+            # IST timezone
+            from datetime import timezone, timedelta
+            IST = timezone(timedelta(hours=5, minutes=30))
+            current_time = datetime.now(IST)
             
             for post in pending_posts:
                 scheduled_time = post['scheduled_time']
+                
+                # Make sure scheduled_time has timezone
+                if scheduled_time.tzinfo is None:
+                    scheduled_time = scheduled_time.replace(tzinfo=IST)
+                else:
+                    scheduled_time = scheduled_time.astimezone(IST)
                 
                 # Check if it's time to post
                 if current_time >= scheduled_time:
