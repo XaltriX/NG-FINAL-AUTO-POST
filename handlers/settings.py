@@ -66,24 +66,35 @@ async def manage_channels_callback(update: Update, context: ContextTypes.DEFAULT
     if channels:
         channel_list = "\n\n*Your Channels:*\n"
         for i, channel in enumerate(channels, 1):
-            channel_list += f"{i}\\. {channel.get('title', 'Unknown')} \\(`{channel['id']}`\\)\n"
+            ch_title = channel.get('title', 'Unknown')
+            ch_id = str(channel['id'])
+            channel_list += f"{i}\\. {ch_title} \\(`{ch_id}`\\)\n"
     else:
-        channel_list = "\n\n_No channels added yet\\._"
+        channel_list = "\n\nNo channels added yet\\."
     
-    await query.edit_message_text(
-        f"""📢 *Channel Management*
+    msg_text = f"""📢 *Channel Management*
 {channel_list}
 
-*How to add a channel:*
-1\\. Make bot admin in your channel
-2\\. Send channel username \\(@channel\\)
-3\\. Or send channel ID \\(\\-100xxxxxxxxxx\\)
-4\\. Or forward a message from channel
+*How to add:*
+1\\. Make bot admin in channel
+2\\. Send @channel or \\-100xxx
+3\\. Or forward message
 
-_Send channel info now or tap Back:_""",
-        reply_markup=back_to_main_keyboard(),
-        parse_mode='MarkdownV2'
-    )
+Send channel info now:"""
+    
+    try:
+        await query.edit_message_text(
+            msg_text,
+            reply_markup=back_to_main_keyboard(),
+            parse_mode='MarkdownV2'
+        )
+    except Exception as e:
+        logger.error(f"Error in manage_channels: {e}")
+        # Fallback without markdown
+        await query.message.reply_text(
+            "📢 Channel Management\n\nSend channel username (@channel) or ID (-100xxx):",
+            reply_markup=back_to_main_keyboard()
+        )
     
     return AWAIT_CHANNEL_INPUT
 
@@ -98,13 +109,14 @@ async def receive_channel_input(update: Update, context: ContextTypes.DEFAULT_TY
     
     try:
         # Check if it's a forwarded message from channel
-        # Check if it's a forwarded message from a channel
-        if message.forward_from_chat:
-            forward_chat = message.forward_from_chat
-            if forward_chat.type == 'channel':
-                channel_id = forward_chat.id
-                channel_title = forward_chat.title
-                
+        if message.forward_origin:
+            # New API: forward_origin instead of forward_from_chat
+            if hasattr(message.forward_origin, 'chat'):
+                forward_chat = message.forward_origin.chat
+                if forward_chat.type == 'channel':
+                    channel_id = forward_chat.id
+                    channel_title = forward_chat.title
+        
         # Check if it's a username or ID
         elif message.text:
             text = message.text.strip()
