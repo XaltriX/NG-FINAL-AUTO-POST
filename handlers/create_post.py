@@ -1,7 +1,4 @@
-# ========== CANCEL ==========
-
-async def cancel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    Cancel post creationfrom telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CallbackQueryHandler, MessageHandler, filters, ConversationHandler
 from telegram.error import TimedOut, NetworkError
 from templates import template_a, template_b, template_c, template_d
@@ -22,7 +19,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Conversation states
-SELECT_TYPE, AWAIT_MEDIA, AWAIT_TITLE, AWAIT_PREVIEW, AWAIT_DOWNLOAD, AWAIT_HOW_TO, SELECT_CHANNEL = range(7)
+SELECT_TYPE, AWAIT_MEDIA, AWAIT_TITLE, AWAIT_PREVIEW, AWAIT_DOWNLOAD, AWAIT_HOW_TO = range(6)
 
 # ========== HELPER: SAFE REPLY ==========
 
@@ -40,7 +37,7 @@ async def safe_reply(message, text, **kwargs):
                 logger.error(f"Failed to send message after {max_retries} attempts: {e}")
                 raise
             logger.warning(f"Timeout on attempt {attempt + 1}, retrying...")
-            await asyncio.sleep(2)  # Wait 2 seconds before retry
+            await asyncio.sleep(2)
 
 
 # ========== STEP 1: SELECT POST TYPE ==========
@@ -327,62 +324,24 @@ async def show_post_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text,
                 reply_markup=buttons,
                 parse_mode='MarkdownV2',
-                disable_web_page_preview=True  # DISABLE PREVIEW
+                disable_web_page_preview=True
             )
         
         # Show post actions
         await safe_reply(
             update.message,
-            "✅ *Post Created Successfully\\!*\n\nChoose an action:",
-            reply_markup=post_preview_keyboard(),
-            parse_mode='MarkdownV2'
+            "✅ Post Created Successfully!\n\nChoose an action:",
+            reply_markup=post_preview_keyboard()
         )
         
     except Exception as e:
-        logger.error(f"Error sending preview with MarkdownV2: {e}")
-        # Fallback: send without formatting
-        try:
-            if post_type == 'A':
-                media_type = post_data['media_type']
-                file_id = post_data['media_file_id']
-                
-                if media_type == 'photo':
-                    await update.message.reply_photo(
-                        photo=file_id,
-                        caption=text,
-                        reply_markup=buttons
-                    )
-                elif media_type == 'video':
-                    await update.message.reply_video(
-                        video=file_id,
-                        caption=text,
-                        reply_markup=buttons
-                    )
-                elif media_type == 'animation':
-                    await update.message.reply_animation(
-                        animation=file_id,
-                        caption=text,
-                        reply_markup=buttons
-                    )
-            else:
-                await safe_reply(
-                    update.message,
-                    text,
-                    reply_markup=buttons
-                )
-            
-            await safe_reply(
-                update.message,
-                "✅ Post Created Successfully!\n\nChoose an action:",
-                reply_markup=post_preview_keyboard()
-            )
-        except Exception as e2:
-            logger.error(f"Error sending preview without formatting: {e2}")
-            await safe_reply(
-                update.message,
-                "✅ Post created but preview failed. You can still post or schedule it.",
-                reply_markup=post_preview_keyboard()
-            )
+        logger.error(f"Error sending preview: {e}")
+        # Fallback without formatting
+        await safe_reply(
+            update.message,
+            "✅ Post created! Choose an action:",
+            reply_markup=post_preview_keyboard()
+        )
     
     return ConversationHandler.END
 
@@ -403,12 +362,14 @@ async def edit_post_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     
     await query.message.reply_text(
-        "✏️ *Edit Post*\n\n"
-        "⚠️ Edit feature coming soon\\!\n\n"
-        "For now, please create a new post\\.",
-        reply_markup=back_to_main_keyboard(),
-        parse_mode='MarkdownV2'
+        "✏️ Edit Post\n\n"
+        "⚠️ Edit feature coming soon!\n\n"
+        "For now, please create a new post.",
+        reply_markup=back_to_main_keyboard()
     )
+
+
+# ========== POST NOW ==========
 
 async def post_now_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle post now action - show channel selection"""
@@ -423,83 +384,117 @@ async def post_now_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # Get user's channels (where bot is admin)
-    try:
-        user_id = update.effective_user.id
-        channels = await get_user_channels(context, user_id)
-        
-        if not channels:
-            await query.message.reply_text(
-                "⚠️ *No channels found\\!*\n\n"
-                "Please add channels first:\n"
-                "1\\. Make bot admin in your channel\n"
-                "2\\. Use /addchannel command\n"
-                "3\\. Or send channel invite link/ID",
-                reply_markup=back_to_main_keyboard(),
-                parse_mode='MarkdownV2'
-            )
-            return
-        
-        # Show channel selection
-        keyboard = channel_selection_keyboard(channels)
-        await query.message.reply_text(
-            "📢 *Select Channel to Post:*",
-            reply_markup=keyboard,
-            parse_mode='MarkdownV2'
-        )
-        
-    except Exception as e:
-        logger.error(f"Error in post_now: {e}")
-        await query.message.reply_text(
-            "❌ Error loading channels. Please try again.",
-            reply_markup=back_to_main_keyboard()
-        )
-
-
-async def get_user_channels(context, user_id):
-    """Get list of channels where bot is admin"""
-    # Get from database
+    # Get user's channels
+    user_id = update.effective_user.id
     user_settings = db.get_user_settings(user_id)
     channels = user_settings.get('channels', [])
     
-    # Verify bot is still admin in these channels
-    verified_channels = []
-    for channel in channels:
-        try:
-            chat = await context.bot.get_chat(channel['id'])
-            # Check if bot is admin
-            bot_member = await context.bot.get_chat_member(channel['id'], context.bot.id)
-            if bot_member.status in ['administrator', 'creator']:
-                verified_channels.append({
-                    'id': channel['id'],
-                    'title': chat.title or channel['title']
-                })
-        except Exception as e:
-            logger.warning(f"Channel {channel['id']} not accessible: {e}")
-            continue
-    
-    return verified_channels
-
-
-async def select_channel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle channel selection and post"""
-    query = update.callback_query
-    await query.answer()
-    
-    # Extract channel ID from callback data
-    channel_id = query.data.replace('select_channel_', '')
-    
-    # Get post data
-    post_type = context.user_data.get('post_type')
-    post_data = context.user_data.get('post_data', {})
-    generated_text = context.user_data.get('generated_text')
-    
-    if not generated_text:
+    if not channels:
         await query.message.reply_text(
-            "❌ Post data not found! Please create a post again.",
+            "⚠️ No channels found!\n\n"
+            "Please add channels first:\n"
+            "Settings → Manage Channels",
             reply_markup=back_to_main_keyboard()
         )
         return
+    
+    # Initialize selected channels
+    if 'post_now_channels' not in context.user_data:
+        context.user_data['post_now_channels'] = []
+    
+    # Show channel selection
+    await show_post_now_channel_selection(update, context, channels)
+
+
+async def show_post_now_channel_selection(update, context, channels):
+    """Show channel selection UI for post now"""
+    keyboard = []
+    
+    for channel in channels:
+        ch_id = channel['id']
+        ch_title = channel.get('title', 'Unknown')
+        
+        # Check if selected
+        is_selected = ch_id in context.user_data.get('post_now_channels', [])
+        emoji = "✅" if is_selected else "⬜"
+        
+        keyboard.append([InlineKeyboardButton(
+            f"{emoji} {ch_title}",
+            callback_data=f"toggle_post_ch_{ch_id}"
+        )])
+    
+    # Add action buttons
+    keyboard.append([InlineKeyboardButton("📤 Post to Selected", callback_data="confirm_post_channels")])
+    keyboard.append([InlineKeyboardButton("🔙 Cancel", callback_data="cancel_post")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    selected_count = len(context.user_data.get('post_now_channels', []))
+    msg = f"📢 Select Channels to Post\n\nSelected: {selected_count}/{len(channels)}\n\nTap to select/deselect:"
+    
+    if hasattr(update, 'callback_query'):
+        try:
+            await update.callback_query.edit_message_text(
+                msg,
+                reply_markup=reply_markup
+            )
+        except:
+            await update.callback_query.message.reply_text(
+                msg,
+                reply_markup=reply_markup
+            )
+    else:
+        await update.message.reply_text(
+            msg,
+            reply_markup=reply_markup
+        )
+
+
+async def toggle_post_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Toggle channel selection for post now"""
+    query = update.callback_query
+    await query.answer()
+    
+    # Extract channel ID
+    channel_id = int(query.data.replace('toggle_post_ch_', ''))
+    
+    # Toggle selection
+    if 'post_now_channels' not in context.user_data:
+        context.user_data['post_now_channels'] = []
+    
+    if channel_id in context.user_data['post_now_channels']:
+        context.user_data['post_now_channels'].remove(channel_id)
+    else:
+        context.user_data['post_now_channels'].append(channel_id)
+    
+    # Refresh UI
+    user_settings = db.get_user_settings(update.effective_user.id)
+    channels = user_settings.get('channels', [])
+    await show_post_now_channel_selection(update, context, channels)
+
+
+async def confirm_post_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Confirm and post to selected channels"""
+    query = update.callback_query
+    await query.answer()
+    
+    selected_channels = context.user_data.get('post_now_channels', [])
+    
+    if not selected_channels:
+        await query.answer("⚠️ Please select at least one channel!", show_alert=True)
+        return
+    
+    # Post to all selected channels
+    await post_to_channels(update, context, selected_channels)
+
+
+async def post_to_channels(update, context, channel_ids):
+    """Post to multiple selected channels"""
+    query = update.callback_query
+    
+    post_type = context.user_data.get('post_type')
+    post_data = context.user_data.get('post_data', {})
+    generated_text = context.user_data.get('generated_text')
     
     # Create buttons with URLs
     how_to = post_data.get('how_to_link')
@@ -509,79 +504,12 @@ async def select_channel_callback(update: Update, context: ContextTypes.DEFAULT_
         how_to
     )
     
-    try:
-        # Post to channel
-        if post_type == 'A' and 'media_file_id' in post_data:
-            media_type = post_data['media_type']
-            file_id = post_data['media_file_id']
-            
-            if media_type == 'photo':
-                sent_message = await context.bot.send_photo(
-                    chat_id=channel_id,
-                    photo=file_id,
-                    caption=generated_text,
-                    reply_markup=buttons,
-                    parse_mode='MarkdownV2'
-                )
-            elif media_type == 'video':
-                sent_message = await context.bot.send_video(
-                    chat_id=channel_id,
-                    video=file_id,
-                    caption=generated_text,
-                    reply_markup=buttons,
-                    parse_mode='MarkdownV2'
-                )
-            elif media_type == 'animation':
-                sent_message = await context.bot.send_animation(
-                    chat_id=channel_id,
-                    animation=file_id,
-                    caption=generated_text,
-                    reply_markup=buttons,
-                    parse_mode='MarkdownV2'
-                )
-        else:
-            sent_message = await context.bot.send_message(
-                chat_id=channel_id,
-                text=generated_text,
-                reply_markup=buttons,
-                parse_mode='MarkdownV2',
-                disable_web_page_preview=True  # DISABLE PREVIEW
-            )
-        
-        # Save to database
-        save_data = {
-            'type': post_type,
-            'title': post_data.get('title', ''),
-            'preview_link': post_data.get('preview_link'),
-            'download_link': post_data.get('download_link'),
-            'how_to_link': post_data.get('how_to_link'),
-            'message_id': sent_message.message_id,
-            'chat_id': channel_id,
-            'views': 0
-        }
-        
-        if post_type == 'A':
-            save_data['media_file_id'] = post_data.get('media_file_id')
-            save_data['media_type'] = post_data.get('media_type')
-        
-        db.save_post(save_data)
-        
-        # Success message
-        await query.message.reply_text(
-            "✅ *Post Published Successfully\\!*\n\n"
-            f"Posted to channel: {channel_id}",
-            reply_markup=back_to_main_keyboard(),
-            parse_mode='MarkdownV2'
-        )
-        
-        # Clear user data
-        context.user_data.clear()
-        
-    except Exception as e:
-        logger.error(f"Error posting to channel: {e}")
-        
-        # Try without MarkdownV2 as fallback
+    success_channels = []
+    failed_channels = []
+    
+    for channel_id in channel_ids:
         try:
+            # Post to channel
             if post_type == 'A' and 'media_file_id' in post_data:
                 media_type = post_data['media_type']
                 file_id = post_data['media_file_id']
@@ -591,27 +519,31 @@ async def select_channel_callback(update: Update, context: ContextTypes.DEFAULT_
                         chat_id=channel_id,
                         photo=file_id,
                         caption=generated_text,
-                        reply_markup=buttons
+                        reply_markup=buttons,
+                        parse_mode='MarkdownV2'
                     )
                 elif media_type == 'video':
                     sent_message = await context.bot.send_video(
                         chat_id=channel_id,
                         video=file_id,
                         caption=generated_text,
-                        reply_markup=buttons
+                        reply_markup=buttons,
+                        parse_mode='MarkdownV2'
                     )
                 elif media_type == 'animation':
                     sent_message = await context.bot.send_animation(
                         chat_id=channel_id,
                         animation=file_id,
                         caption=generated_text,
-                        reply_markup=buttons
+                        reply_markup=buttons,
+                        parse_mode='MarkdownV2'
                     )
             else:
                 sent_message = await context.bot.send_message(
                     chat_id=channel_id,
                     text=generated_text,
                     reply_markup=buttons,
+                    parse_mode='MarkdownV2',
                     disable_web_page_preview=True
                 )
             
@@ -632,27 +564,26 @@ async def select_channel_callback(update: Update, context: ContextTypes.DEFAULT_
                 save_data['media_type'] = post_data.get('media_type')
             
             db.save_post(save_data)
+            success_channels.append(channel_id)
             
-            # Success message
-            await query.message.reply_text(
-                "✅ *Post Published Successfully\\!* \\(Plain text fallback\\)\n\n"
-                f"Posted to channel: {escape_markdown(str(channel_id))}",
-                reply_markup=back_to_main_keyboard(),
-                parse_mode='MarkdownV2'
-            )
-            
-            # Clear user data
-            context.user_data.clear()
-            
-        except Exception as e2:
-            logger.error(f"Error in fallback posting: {e2}")
-            await query.message.reply_text(
-                f"❌ *Error posting to channel\\!*\n\n"
-                f"Error: {escape_markdown(str(e))}\n\n"
-                f"Make sure bot is admin in the channel\\.",
-                reply_markup=back_to_main_keyboard(),
-                parse_mode='MarkdownV2'
-            )
+        except Exception as e:
+            logger.error(f"Error posting to channel {channel_id}: {e}")
+            failed_channels.append(channel_id)
+    
+    # Success message
+    result_msg = f"✅ Posted Successfully!\n\n"
+    result_msg += f"Posted to: {len(success_channels)} channel(s)\n"
+    
+    if failed_channels:
+        result_msg += f"Failed: {len(failed_channels)} channel(s)"
+    
+    await query.edit_message_text(
+        result_msg,
+        reply_markup=back_to_main_keyboard()
+    )
+    
+    # Clear user data
+    context.user_data.clear()
 
 
 # ========== CANCEL ==========
@@ -671,27 +602,26 @@ async def cancel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         try:
             await query.edit_message_text(
-                "❌ *Post creation cancelled\\.*\n\nReturning to main menu\\.\\.\\.",
-                reply_markup=main_menu_keyboard(pending_count),
-                parse_mode='MarkdownV2'
+                "❌ Post creation cancelled.\n\nReturning to main menu...",
+                reply_markup=main_menu_keyboard(pending_count)
             )
         except Exception as e:
             logger.error(f"Error editing message on cancel: {e}")
             # Fallback: send new message
             await query.message.reply_text(
-                "❌ *Post creation cancelled\\.*",
-                reply_markup=main_menu_keyboard(pending_count),
-                parse_mode='MarkdownV2'
+                "❌ Post creation cancelled.",
+                reply_markup=main_menu_keyboard(pending_count)
             )
     else:
         await update.message.reply_text(
-            "❌ *Post creation cancelled\\.*",
-            reply_markup=back_to_main_keyboard(),
-            parse_mode='MarkdownV2'
+            "❌ Post creation cancelled.",
+            reply_markup=back_to_main_keyboard()
         )
     
     return ConversationHandler.END
 
+
+# ========== REGISTER HANDLERS ==========
 
 def register_create_post_handlers(application):
     """Register create post conversation handler"""
@@ -724,7 +654,6 @@ def register_create_post_handlers(application):
         },
         fallbacks=[
             CallbackQueryHandler(cancel_post, pattern="^cancel_post$"),
-            CallbackQueryHandler(back_to_main_callback, pattern="^back_to_main$"),
         ],
     )
     
