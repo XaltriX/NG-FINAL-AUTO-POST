@@ -1,4 +1,4 @@
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CallbackQueryHandler, MessageHandler, filters, ConversationHandler
 from database import db
 from utils import (
@@ -11,8 +11,10 @@ from utils import (
     is_future_datetime,
     format_datetime
 )
-from datetime import datetime
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from datetime import datetime, timezone, timedelta
+
+# IST Timezone
+IST = timezone(timedelta(hours=5, minutes=30))
 
 # Conversation states
 AWAIT_CUSTOM_TIME, SELECT_CHANNELS = range(2)
@@ -112,22 +114,34 @@ async def receive_custom_time(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not validate_datetime_format(time_str):
         await update.message.reply_text(
             "❌ Invalid format!\n\n"
-            "Please use: `DD/MM/YYYY HH:MM`\n"
-            "Example: `25/12/2024 15:30`",
-            reply_markup=back_to_main_keyboard(),
-            parse_mode='Markdown'
+            "Please use: DD/MM/YYYY HH:MM\n"
+            "Example: 25/12/2024 15:30",
+            reply_markup=back_to_main_keyboard()
         )
         return AWAIT_CUSTOM_TIME
     
     scheduled_time = parse_datetime(time_str)
     
-    if not is_future_datetime(scheduled_time):
+    if not scheduled_time:
         await update.message.reply_text(
-            "❌ Time must be in the future!\n\n"
-            "Please enter a future date and time.",
+            "❌ Error parsing time!",
             reply_markup=back_to_main_keyboard()
         )
         return AWAIT_CUSTOM_TIME
+    
+    if not is_future_datetime(scheduled_time):
+        await update.message.reply_text(
+            "❌ Time must be in the future!\n\n"
+            f"You entered: {format_datetime(scheduled_time)}\n"
+            f"Current IST: {format_datetime(datetime.now(IST))}",
+            reply_markup=back_to_main_keyboard()
+        )
+        return AWAIT_CUSTOM_TIME
+    
+    # Show confirmation with IST time
+    await update.message.reply_text(
+        f"✅ Time set to: {format_datetime(scheduled_time)}\n\nProceeding to channel selection..."
+    )
     
     context.user_data['scheduled_time'] = scheduled_time
     
@@ -142,19 +156,23 @@ async def show_channel_selection(update, context):
     channels = user_settings.get('channels', [])
     
     if not channels:
-        msg = "❌ *No channels found\\!*\n\nPlease add channels first:\nSettings → Manage Channels"
+        msg = "❌ No channels found!\n\nPlease add channels first:\nSettings → Manage Channels"
         
         if hasattr(update, 'callback_query'):
-            await update.callback_query.edit_message_text(
-                msg,
-                reply_markup=back_to_main_keyboard(),
-                parse_mode='MarkdownV2'
-            )
+            try:
+                await update.callback_query.edit_message_text(
+                    msg,
+                    reply_markup=back_to_main_keyboard()
+                )
+            except:
+                await update.callback_query.message.reply_text(
+                    msg,
+                    reply_markup=back_to_main_keyboard()
+                )
         else:
             await update.message.reply_text(
                 msg,
-                reply_markup=back_to_main_keyboard(),
-                parse_mode='MarkdownV2'
+                reply_markup=back_to_main_keyboard()
             )
         return ConversationHandler.END
     
@@ -184,26 +202,23 @@ async def show_channel_selection(update, context):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     selected_count = len(context.user_data['selected_channels'])
-    msg = f"📢 *Select Channels for Posting*\n\nSelected: {selected_count}/{len(channels)}\n\nTap to select/deselect:"
+    msg = f"📢 Select Channels for Posting\n\nSelected: {selected_count}/{len(channels)}\n\nTap to select/deselect:"
     
     if hasattr(update, 'callback_query'):
         try:
             await update.callback_query.edit_message_text(
                 msg,
-                reply_markup=reply_markup,
-                parse_mode='MarkdownV2'
+                reply_markup=reply_markup
             )
         except:
             await update.callback_query.message.reply_text(
                 msg,
-                reply_markup=reply_markup,
-                parse_mode='MarkdownV2'
+                reply_markup=reply_markup
             )
     else:
         await update.message.reply_text(
             msg,
-            reply_markup=reply_markup,
-            parse_mode='MarkdownV2'
+            reply_markup=reply_markup
         )
     
     return SELECT_CHANNELS
@@ -277,29 +292,32 @@ async def save_scheduled_post_with_channels(update, context, scheduled_time, cha
     # Save to database
     result = db.save_scheduled_post(schedule_data)
     
-    from templates.post_templates import escape_markdown
     time_str = format_datetime(scheduled_time)
     ch_count = len(channel_ids)
     
-    success_msg = f"""✅ *Post Scheduled Successfully\\!*
+    success_msg = f"""✅ Post Scheduled Successfully!
 
-📅 Time: {escape_markdown(time_str)}
+📅 Time: {time_str}
 📝 Type: {post_type}
 📢 Channels: {ch_count}
 
-Will post automatically\\."""
+Will post automatically."""
     
     if hasattr(update, 'callback_query'):
-        await update.callback_query.edit_message_text(
-            success_msg,
-            reply_markup=back_to_main_keyboard(),
-            parse_mode='MarkdownV2'
-        )
+        try:
+            await update.callback_query.edit_message_text(
+                success_msg,
+                reply_markup=back_to_main_keyboard()
+            )
+        except:
+            await update.callback_query.message.reply_text(
+                success_msg,
+                reply_markup=back_to_main_keyboard()
+            )
     else:
         await update.message.reply_text(
             success_msg,
-            reply_markup=back_to_main_keyboard(),
-            parse_mode='MarkdownV2'
+            reply_markup=back_to_main_keyboard()
         )
     
     # Clear user data
