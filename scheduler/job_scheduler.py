@@ -1,5 +1,5 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from database import db
 from templates import template_a, template_b, template_c, template_d
 from utils import post_buttons_with_links
@@ -7,10 +7,13 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# IST timezone constant
+IST = timezone(timedelta(hours=5, minutes=30))
+
 class PostScheduler:
     def __init__(self, bot):
         self.bot = bot
-        self.scheduler = AsyncIOScheduler()
+        self.scheduler = AsyncIOScheduler(timezone=IST)  # Set scheduler timezone to IST
     
     def start(self):
         """Start the scheduler"""
@@ -22,7 +25,7 @@ class PostScheduler:
             id='check_pending_posts'
         )
         self.scheduler.start()
-        logger.info("Scheduler started")
+        logger.info("Scheduler started with IST timezone")
     
     async def check_pending_posts(self):
         """Check and post pending scheduled posts"""
@@ -31,9 +34,7 @@ class PostScheduler:
             pending_posts = db.get_pending_scheduled_posts()
             logger.info(f"📌 Found {len(pending_posts)} pending posts")
             
-            # IST timezone
-            from datetime import timezone, timedelta
-            IST = timezone(timedelta(hours=5, minutes=30))
+            # Current time in IST
             current_time = datetime.now(IST)
             
             logger.info(f"⏰ Current IST time: {current_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
@@ -41,17 +42,17 @@ class PostScheduler:
             for post in pending_posts:
                 scheduled_time = post['scheduled_time']
                 
-                # Make sure scheduled_time has timezone
+                # Convert scheduled_time to IST for comparison
                 if scheduled_time.tzinfo is None:
-                    # If naive, assume it's IST
+                    # If naive datetime, treat it as IST
                     scheduled_time = scheduled_time.replace(tzinfo=IST)
                     logger.info(f"📅 Post scheduled (naive→IST): {scheduled_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
                 else:
-                    # Convert to IST for comparison
+                    # Convert to IST
                     scheduled_time = scheduled_time.astimezone(IST)
                     logger.info(f"📅 Post scheduled (converted): {scheduled_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
                 
-                # Check if it's time to post
+                # Check if it's time to post (with 1 minute buffer)
                 if current_time >= scheduled_time:
                     logger.info(f"⏰ Time to post NOW: {post['_id']}")
                     await self.publish_scheduled_post(post)
@@ -83,6 +84,9 @@ class PostScheduler:
                 post_data['download_link'],
                 how_to
             ) if post_data.get('preview_link') else None
+            
+            posted_count = 0
+            failed_count = 0
             
             # Post to each channel
             for channel_id in channel_ids:
@@ -124,10 +128,10 @@ class PostScheduler:
                             text=generated_text,
                             reply_markup=buttons,
                             parse_mode='MarkdownV2',
-                            disable_web_page_preview=True  # DISABLE PREVIEW
+                            disable_web_page_preview=True
                         )
                     
-                    # Save to posts collection
+                    # Save to posts collection with IST timestamp
                     save_data = {
                         'type': post_type,
                         'title': post_data.get('title', ''),
@@ -136,7 +140,7 @@ class PostScheduler:
                         'how_to_link': post_data.get('how_to_link'),
                         'message_id': sent_message.message_id,
                         'chat_id': channel_id,
-                        'posted_at': datetime.now(),
+                        'posted_at': datetime.now(IST),  # Save with IST timezone
                         'views': 0
                     }
                     
@@ -145,17 +149,23 @@ class PostScheduler:
                         save_data['media_type'] = post_data.get('media_type')
                     
                     db.save_post(save_data)
-                    logger.info(f"Posted to channel {channel_id}")
+                    posted_count += 1
+                    logger.info(f"✅ Posted to channel {channel_id}")
                 
                 except Exception as e:
-                    logger.error(f"Error posting to channel {channel_id}: {e}")
+                    failed_count += 1
+                    logger.error(f"❌ Error posting to channel {channel_id}: {e}")
             
-            # Mark as posted
-            db.update_schedule_status(post['_id'], 'posted')
-            logger.info(f"Scheduled post {post['_id']} published successfully")
+            # Mark as posted if at least one channel succeeded
+            if posted_count > 0:
+                db.update_schedule_status(post['_id'], 'posted')
+                logger.info(f"✅ Scheduled post {post['_id']} published successfully ({posted_count}/{len(channel_ids)} channels)")
+            else:
+                db.update_schedule_status(post['_id'], 'failed')
+                logger.error(f"❌ All channels failed for post {post['_id']}")
         
         except Exception as e:
-            logger.error(f"Error publishing scheduled post: {e}")
+            logger.error(f"❌ Error publishing scheduled post: {e}", exc_info=True)
             db.update_schedule_status(post['_id'], 'failed')
     
     def stop(self):
