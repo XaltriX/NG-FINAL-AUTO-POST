@@ -3,11 +3,10 @@
 LinkzWallah Telegram Post Bot
 Main entry point for the bot
 """
-
 import logging
 from telegram import Update
 from telegram.ext import Application, ContextTypes
-from telegram.error import TimedOut, NetworkError, TelegramError
+from telegram.error import TimedOut, NetworkError, TelegramError, BadRequest
 import config
 from handlers import register_all_handlers
 from scheduler import PostScheduler
@@ -35,26 +34,60 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # Handle BadRequest errors (formatting issues)
-    from telegram.error import BadRequest
     if isinstance(context.error, BadRequest):
         logger.error(f"BadRequest error: {context.error}")
-        if update and isinstance(update, Update) and update.effective_message:
-            try:
-                await update.effective_message.reply_text(
-                    "⚠️ Message formatting error. Please try again or use /start to restart."
-                )
-            except:
-                pass
+        if update and isinstance(update, Update):
+            # Try to get message from either effective_message or callback_query
+            message = None
+            if update.effective_message:
+                message = update.effective_message
+            elif update.callback_query and update.callback_query.message:
+                message = update.callback_query.message
+            
+            if message:
+                try:
+                    await message.reply_text(
+                        "⚠️ Message formatting error. Please try again or use /start to restart."
+                    )
+                except:
+                    pass
+        return
+    
+    # Handle NoneType attribute errors (callback_query.message is None)
+    if isinstance(context.error, AttributeError):
+        error_msg = str(context.error)
+        if "'NoneType' object has no attribute 'message'" in error_msg:
+            logger.warning("Callback query message is None - this is normal for inline queries")
+            return
+        logger.error(f"AttributeError: {context.error}")
         return
     
     # For other errors, try to notify user
-    if update and isinstance(update, Update) and update.effective_message:
-        try:
-            await update.effective_message.reply_text(
-                "⚠️ An error occurred. Please try again or use /start to restart."
-            )
-        except Exception as e:
-            logger.error(f"Could not send error message to user: {e}")
+    if update and isinstance(update, Update):
+        # Try multiple ways to get a message object
+        message = None
+        if update.effective_message:
+            message = update.effective_message
+        elif update.callback_query and update.callback_query.message:
+            message = update.callback_query.message
+        elif update.callback_query:
+            # For inline queries without message, try to answer the callback
+            try:
+                await update.callback_query.answer(
+                    "⚠️ An error occurred. Please try again.",
+                    show_alert=True
+                )
+            except:
+                pass
+            return
+        
+        if message:
+            try:
+                await message.reply_text(
+                    "⚠️ An error occurred. Please try again or use /start to restart."
+                )
+            except Exception as e:
+                logger.error(f"Could not send error message to user: {e}")
 
 def main():
     """Main function to run the bot"""
