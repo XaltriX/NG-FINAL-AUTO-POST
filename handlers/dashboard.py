@@ -15,6 +15,12 @@ def escape_md(text):
 async def dashboard_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show dashboard with pending and posted content"""
     query = update.callback_query
+    
+    # IMPORTANT: Check if message exists
+    if not query.message:
+        await query.answer("⚠️ Cannot display dashboard here", show_alert=True)
+        return
+    
     await query.answer()
     
     # Get pending posts
@@ -71,16 +77,21 @@ async def dashboard_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             reply_markup=reply_markup
         )
     except Exception as e:
-        # Fallback: plain text
+        # Fallback: send new message if edit fails
         await query.message.reply_text(
             "📊 DASHBOARD\n\nPending: " + str(len(pending_posts)) + "\nPosted: " + str(len(recent_posts)),
             reply_markup=reply_markup
         )
 
-
 async def delete_schedule_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Delete a scheduled post"""
     query = update.callback_query
+    
+    # IMPORTANT: Check if message exists
+    if not query.message:
+        await query.answer("⚠️ Cannot delete from here", show_alert=True)
+        return
+    
     await query.answer()
     
     # Extract schedule ID
@@ -95,7 +106,6 @@ async def delete_schedule_callback(update: Update, context: ContextTypes.DEFAULT
     
     # Refresh dashboard
     await dashboard_callback(update, context)
-
 
 def register_dashboard_handlers(application):
     """Register dashboard handlers"""
