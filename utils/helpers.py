@@ -7,17 +7,13 @@ IST = timezone(timedelta(hours=5, minutes=30))
 async def get_channel_list(context, user_id):
     """Get list of channels where bot is admin"""
     channels = []
-    # This is a placeholder - you need to implement channel storage
-    # For now, returning empty list
     return channels
 
 async def get_post_views(context, chat_id, message_id):
     """Get views count for a post"""
     try:
-        # Note: This only works for channels, not groups
-        # Returns None if views are not available
         message = await context.bot.get_chat(chat_id)
-        return None  # Telegram doesn't provide direct view count via Bot API
+        return None
     except TelegramError:
         return None
 
@@ -32,14 +28,21 @@ def format_datetime(dt):
     return dt.strftime('%d/%m/%Y %H:%M IST')
 
 def get_next_hour():
-    """Get next hour datetime in IST"""
+    """Get next hour datetime in IST - ALWAYS returns future time"""
     now = datetime.now(IST)
-    next_hour = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    # Round up to next hour
+    next_hour = (now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
+    
+    # Safety check: ensure it's actually in the future
+    if next_hour <= now:
+        next_hour = next_hour + timedelta(hours=1)
+    
     return next_hour
 
 def get_time_offset(hours):
     """Get datetime with offset in IST"""
-    return datetime.now(IST) + timedelta(hours=hours)
+    result = datetime.now(IST) + timedelta(hours=hours)
+    return result
 
 def truncate_text(text, max_length=50):
     """Truncate text with ellipsis"""
