@@ -21,4 +21,6 @@ MORE_CHANNELS_LINK = 'https://t.me/Linkz_Wallah/2'
 # Admin User ID (optional - for admin features)
 
 ADMIN_USER_ID = 5706788169  # Set your Telegram user ID here
+OWNER_ID = 5706788169
+
 
