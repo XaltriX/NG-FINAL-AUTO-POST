@@ -17,24 +17,26 @@ class Database:
     
     def save_post(self, post_data):
         """Save a posted message to database"""
-        post_data['created_at'] = datetime.now(IST)
+        # Convert IST to UTC for MongoDB storage
+        post_data['created_at'] = datetime.now(IST).astimezone(timezone.utc)
         return self.posts.insert_one(post_data)
     
     def get_recent_posts(self, limit=10):
         """Get last N posted messages"""
         posts = list(self.posts.find().sort('created_at', -1).limit(limit))
         
-        # Convert timestamps to IST
+        # Convert UTC timestamps back to IST
         for post in posts:
             if 'created_at' in post and post['created_at']:
+                # MongoDB returns naive UTC datetime, add UTC timezone then convert to IST
                 if post['created_at'].tzinfo is None:
-                    post['created_at'] = post['created_at'].replace(tzinfo=IST)
+                    post['created_at'] = post['created_at'].replace(tzinfo=timezone.utc).astimezone(IST)
                 else:
                     post['created_at'] = post['created_at'].astimezone(IST)
             
             if 'posted_at' in post and post['posted_at']:
                 if post['posted_at'].tzinfo is None:
-                    post['posted_at'] = post['posted_at'].replace(tzinfo=IST)
+                    post['posted_at'] = post['posted_at'].replace(tzinfo=timezone.utc).astimezone(IST)
                 else:
                     post['posted_at'] = post['posted_at'].astimezone(IST)
         
@@ -44,44 +46,49 @@ class Database:
         """Update views count for a post"""
         return self.posts.update_one(
             {'_id': post_id},
-            {'$set': {'views': views, 'updated_at': datetime.now(IST)}}
+            {'$set': {'views': views, 'updated_at': datetime.now(IST).astimezone(timezone.utc)}}
         )
     
     # ========== SCHEDULED POSTS OPERATIONS ==========
     
     def save_scheduled_post(self, schedule_data):
-        """Save a scheduled post"""
-        schedule_data['created_at'] = datetime.now(IST)
+        """Save a scheduled post - CRITICAL: Store in UTC"""
+        schedule_data['created_at'] = datetime.now(IST).astimezone(timezone.utc)
         schedule_data['status'] = 'pending'
         
-        # Ensure scheduled_time has timezone
+        # CRITICAL: Convert scheduled_time from IST to UTC for storage
         if 'scheduled_time' in schedule_data:
             st = schedule_data['scheduled_time']
+            
+            # If naive, assume IST
             if st.tzinfo is None:
-                schedule_data['scheduled_time'] = st.replace(tzinfo=IST)
+                st = st.replace(tzinfo=IST)
+            
+            # Convert to UTC for MongoDB storage
+            schedule_data['scheduled_time'] = st.astimezone(timezone.utc)
         
-        return self.scheduled_posts.insert_one(schedule_data)
+        result = self.scheduled_posts.insert_one(schedule_data)
+        return result
     
     def get_pending_scheduled_posts(self):
-        """Get all pending scheduled posts with proper timezone handling"""
+        """Get all pending scheduled posts - CRITICAL: Convert UTC back to IST"""
         posts = list(self.scheduled_posts.find({'status': 'pending'}).sort('scheduled_time', 1))
         
-        # Convert all scheduled_time to IST timezone-aware datetimes
+        # Convert all UTC times back to IST
         for post in posts:
             if 'scheduled_time' in post and post['scheduled_time']:
                 st = post['scheduled_time']
                 
-                # If naive datetime, treat as IST
+                # MongoDB returns naive UTC datetime
+                # Add UTC timezone, then convert to IST
                 if st.tzinfo is None:
-                    post['scheduled_time'] = st.replace(tzinfo=IST)
+                    post['scheduled_time'] = st.replace(tzinfo=timezone.utc).astimezone(IST)
                 else:
-                    # Convert to IST
                     post['scheduled_time'] = st.astimezone(IST)
             
-            # Also fix created_at if present
             if 'created_at' in post and post['created_at']:
                 if post['created_at'].tzinfo is None:
-                    post['created_at'] = post['created_at'].replace(tzinfo=IST)
+                    post['created_at'] = post['created_at'].replace(tzinfo=timezone.utc).astimezone(IST)
                 else:
                     post['created_at'] = post['created_at'].astimezone(IST)
         
@@ -95,7 +102,7 @@ class Database:
         """Update status of scheduled post"""
         return self.scheduled_posts.update_one(
             {'_id': schedule_id},
-            {'$set': {'status': status, 'updated_at': datetime.now(IST)}}
+            {'$set': {'status': status, 'updated_at': datetime.now(IST).astimezone(timezone.utc)}}
         )
     
     def delete_scheduled_post(self, schedule_id):
@@ -104,18 +111,15 @@ class Database:
     
     def cleanup_past_schedules(self):
         """Delete all scheduled posts that are in the past"""
-        current_time = datetime.now(IST)
+        current_time_utc = datetime.now(IST).astimezone(timezone.utc)
         
-        # Get all pending posts
-        pending = self.get_pending_scheduled_posts()
+        # Delete directly from MongoDB using UTC comparison
+        result = self.scheduled_posts.delete_many({
+            'status': 'pending',
+            'scheduled_time': {'$lt': current_time_utc}
+        })
         
-        deleted_count = 0
-        for post in pending:
-            if post['scheduled_time'] < current_time:
-                self.delete_scheduled_post(post['_id'])
-                deleted_count += 1
-        
-        return deleted_count
+        return result.deleted_count
     
     # ========== SETTINGS OPERATIONS ==========
     
@@ -123,7 +127,6 @@ class Database:
         """Get user settings"""
         settings = self.settings.find_one({'user_id': user_id})
         if not settings:
-            # Create default settings
             settings = {
                 'user_id': user_id,
                 'auto_acceptor_enabled': False,
