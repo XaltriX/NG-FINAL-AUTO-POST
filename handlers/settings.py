@@ -108,7 +108,6 @@ async def receive_channel_input(update: Update, context: ContextTypes.DEFAULT_TY
     
     try:
         # Check if it's a forwarded message from channel
-        # Try multiple attributes for different PTB versions
         forward_chat = None
         
         # Method 1: forward_origin (PTB 20.7+)
@@ -226,13 +225,27 @@ async def receive_channel_input(update: Update, context: ContextTypes.DEFAULT_TY
         return ConversationHandler.END
 
 
+async def conversation_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle conversation timeout"""
+    logger.warning("Settings conversation timed out")
+    
+    if update.effective_message:
+        await update.effective_message.reply_text(
+            "⏱️ Session expired. Please start again.",
+            reply_markup=back_to_main_keyboard()
+        )
+    
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
 def register_settings_handlers(application):
     """Register settings handlers"""
     # Main settings
     application.add_handler(CallbackQueryHandler(settings_callback, pattern="^settings$"))
     application.add_handler(CallbackQueryHandler(toggle_auto_acceptor, pattern="^toggle_auto_acceptor$"))
     
-    # Channel management conversation
+    # Channel management conversation with extended timeout
     conv_handler = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(manage_channels_callback, pattern="^manage_channels$"),
@@ -245,14 +258,11 @@ def register_settings_handlers(application):
         fallbacks=[
             CallbackQueryHandler(settings_callback, pattern="^settings$"),
         ],
+        conversation_timeout=600,  # 10 minutes timeout
+        name="settings_conversation"  # Unique name
     )
     
     application.add_handler(conv_handler)
-    conv_handler = ConversationHandler(
-    entry_points=[...],
-    states={...},
-    fallbacks=[...],
-    conversation_timeout=600,  # ADD THIS
-    name="settings_conversation"  # ADD THIS
-)
+    
+    logger.info("Settings handlers registered with extended timeout")
 
