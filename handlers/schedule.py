@@ -1,4 +1,3 @@
-
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CallbackQueryHandler, MessageHandler, filters, ConversationHandler
 from database import db
@@ -377,7 +376,6 @@ async def cancel_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer("Scheduling cancelled")
     
     if not query.message:
-        # Clear user data anyway
         context.user_data.clear()
         return ConversationHandler.END
     
@@ -386,7 +384,6 @@ async def cancel_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=back_to_main_keyboard()
     )
     
-    # Clear user data
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -401,7 +398,6 @@ async def conversation_timeout(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=back_to_main_keyboard()
         )
     
-    # Clear user data
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -434,7 +430,7 @@ def register_schedule_handlers(application):
         fallbacks=[
             CallbackQueryHandler(cancel_schedule, pattern="^cancel_schedule$"),
         ],
-        conversation_timeout=600,  # 10 minutes timeout
+        conversation_timeout=600,
         name="schedule_conversation"
     )
     
@@ -445,6 +441,3 @@ def register_schedule_handlers(application):
     application.add_handler(CallbackQueryHandler(confirm_schedule_channels, pattern="^confirm_schedule_channels$"))
     
     logger.info("Schedule handlers registered with extended timeout")
-
-
-
