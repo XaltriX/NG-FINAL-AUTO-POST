@@ -248,3 +248,11 @@ def register_settings_handlers(application):
     )
     
     application.add_handler(conv_handler)
+    conv_handler = ConversationHandler(
+    entry_points=[...],
+    states={...},
+    fallbacks=[...],
+    conversation_timeout=600,  # ADD THIS
+    name="settings_conversation"  # ADD THIS
+)
+
