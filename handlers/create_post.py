@@ -664,15 +664,7 @@ def register_create_post_handlers(application):
     application.add_handler(CallbackQueryHandler(toggle_post_channel, pattern="^toggle_post_ch_"))
     application.add_handler(CallbackQueryHandler(confirm_post_channels, pattern="^confirm_post_channels$"))
 
-conv_handler = ConversationHandler(
-    entry_points=[...],
-    states={...},
-    fallbacks=[...],
-    conversation_timeout=600,  # ADD THIS - 10 minutes
-    name="create_post_conversation"  # ADD THIS
-)
-
-
 # Import for back_to_main_callback
 from .start import back_to_main_callback
+
 
