@@ -5,7 +5,7 @@ Main entry point for the bot
 """
 import logging
 from telegram import Update
-from telegram.ext import Application, ContextTypes
+from telegram.ext import Application, ContextTypes, PicklePersistence
 from telegram.error import TimedOut, NetworkError, TelegramError, BadRequest
 import config
 from handlers import register_all_handlers
@@ -37,7 +37,6 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     if isinstance(context.error, BadRequest):
         logger.error(f"BadRequest error: {context.error}")
         if update and isinstance(update, Update):
-            # Try to get message from either effective_message or callback_query
             message = None
             if update.effective_message:
                 message = update.effective_message
@@ -53,7 +52,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
                     pass
         return
     
-    # Handle NoneType attribute errors (callback_query.message is None)
+    # Handle NoneType attribute errors
     if isinstance(context.error, AttributeError):
         error_msg = str(context.error)
         if "'NoneType' object has no attribute 'message'" in error_msg:
@@ -64,14 +63,12 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     
     # For other errors, try to notify user
     if update and isinstance(update, Update):
-        # Try multiple ways to get a message object
         message = None
         if update.effective_message:
             message = update.effective_message
         elif update.callback_query and update.callback_query.message:
             message = update.callback_query.message
         elif update.callback_query:
-            # For inline queries without message, try to answer the callback
             try:
                 await update.callback_query.answer(
                     "⚠️ An error occurred. Please try again.",
@@ -93,14 +90,18 @@ def main():
     """Main function to run the bot"""
     logger.info("Starting LinkzWallah Bot...")
     
-    # Create application with increased timeouts and connection pooling
+    # Add persistence to save conversation state
+    persistence = PicklePersistence(filepath="bot_data.pkl")
+    
+    # Create application with persistence
     application = (
         Application.builder()
         .token(config.BOT_TOKEN)
-        .connect_timeout(30)  # Increase connection timeout
-        .read_timeout(30)     # Increase read timeout
-        .write_timeout(30)    # Increase write timeout
-        .pool_timeout(30)     # Increase pool timeout
+        .persistence(persistence)
+        .connect_timeout(30)
+        .read_timeout(30)
+        .write_timeout(30)
+        .pool_timeout(30)
         .get_updates_connect_timeout(30)
         .get_updates_read_timeout(30)
         .build()
@@ -121,9 +122,16 @@ def main():
     
     # Start the bot
     logger.info("Bot is now running. Press Ctrl+C to stop.")
+    logger.info("⚠️ IMPORTANT: Listening for chat_join_request updates")
+    
     application.run_polling(
-        allowed_updates=["message", "callback_query", "chat_join_request", "chat_member"],
-        drop_pending_updates=True  # Drop old pending updates on restart
+        allowed_updates=[
+            "message", 
+            "callback_query", 
+            "chat_join_request",
+            "chat_member"
+        ],
+        drop_pending_updates=False
     )
     
     # Stop scheduler on exit
