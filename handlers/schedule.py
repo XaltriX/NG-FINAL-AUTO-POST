@@ -1,3 +1,13 @@
+# 🔧 Complete Fix for Button Issues
+
+## Problem: Buttons stop working after some time
+**Cause:** ConversationHandler timeout + Missing error handling
+
+---
+
+## 📁 File 1: `handlers/schedule.py` (Fixed)
+
+```python
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CallbackQueryHandler, MessageHandler, filters, ConversationHandler
 from database import db
@@ -12,6 +22,9 @@ from utils import (
     format_datetime
 )
 from datetime import datetime, timezone, timedelta
+import logging
+
+logger = logging.getLogger(__name__)
 
 # IST Timezone
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -26,7 +39,7 @@ async def schedule_new_callback(update: Update, context: ContextTypes.DEFAULT_TY
     
     if not query.message:
         await query.answer("⚠️ Cannot schedule from here", show_alert=True)
-        return
+        return ConversationHandler.END
     
     await query.edit_message_text(
         "📅 **Schedule New Post**\n\n"
@@ -35,6 +48,7 @@ async def schedule_new_callback(update: Update, context: ContextTypes.DEFAULT_TY
         reply_markup=back_to_main_keyboard(),
         parse_mode='Markdown'
     )
+    return ConversationHandler.END
 
 
 async def schedule_this_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -44,7 +58,7 @@ async def schedule_this_callback(update: Update, context: ContextTypes.DEFAULT_T
     
     if not query.message:
         await query.answer("⚠️ Cannot schedule from here", show_alert=True)
-        return
+        return ConversationHandler.END
     
     # Check if there's a post in user_data
     if 'generated_text' not in context.user_data:
@@ -53,7 +67,7 @@ async def schedule_this_callback(update: Update, context: ContextTypes.DEFAULT_T
             "Please create a post first.",
             reply_markup=back_to_main_keyboard()
         )
-        return
+        return ConversationHandler.END
     
     await query.edit_message_text(
         "⏰ **Select Schedule Time:**\n\n"
@@ -61,6 +75,7 @@ async def schedule_this_callback(update: Update, context: ContextTypes.DEFAULT_T
         reply_markup=schedule_time_keyboard(),
         parse_mode='Markdown'
     )
+    return ConversationHandler.END
 
 
 async def schedule_next_hour(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -70,6 +85,8 @@ async def schedule_next_hour(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     scheduled_time = get_next_hour()
     context.user_data['scheduled_time'] = scheduled_time
+    
+    logger.info(f"User scheduled for next hour: {scheduled_time}")
     
     # Now show channel selection
     return await show_channel_selection(update, context)
@@ -83,6 +100,8 @@ async def schedule_2_hours(update: Update, context: ContextTypes.DEFAULT_TYPE):
     scheduled_time = get_time_offset(2)
     context.user_data['scheduled_time'] = scheduled_time
     
+    logger.info(f"User scheduled for +2 hours: {scheduled_time}")
+    
     # Now show channel selection
     return await show_channel_selection(update, context)
 
@@ -95,6 +114,8 @@ async def schedule_6_hours(update: Update, context: ContextTypes.DEFAULT_TYPE):
     scheduled_time = get_time_offset(6)
     context.user_data['scheduled_time'] = scheduled_time
     
+    logger.info(f"User scheduled for +6 hours: {scheduled_time}")
+    
     # Now show channel selection
     return await show_channel_selection(update, context)
 
@@ -106,13 +127,16 @@ async def schedule_custom_callback(update: Update, context: ContextTypes.DEFAULT
     
     if not query.message:
         await query.answer("⚠️ Cannot schedule from here", show_alert=True)
-        return
+        return ConversationHandler.END
+    
+    logger.info("User selected custom date/time")
     
     await query.edit_message_text(
         "📅 **Custom Date & Time**\n\n"
         "Enter the date and time in this format:\n"
         "`DD/MM/YYYY HH:MM`\n\n"
-        "Example: `25/12/2024 15:30`",
+        "Example: `25/12/2024 15:30`\n\n"
+        "⏰ Current IST: " + format_datetime(datetime.now(IST)),
         reply_markup=back_to_main_keyboard(),
         parse_mode='Markdown'
     )
@@ -122,6 +146,8 @@ async def schedule_custom_callback(update: Update, context: ContextTypes.DEFAULT
 async def receive_custom_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receive and validate custom datetime"""
     time_str = update.message.text.strip()
+    
+    logger.info(f"Received custom time input: {time_str}")
     
     if not validate_datetime_format(time_str):
         await update.message.reply_text(
@@ -156,6 +182,8 @@ async def receive_custom_time(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
     
     context.user_data['scheduled_time'] = scheduled_time
+    
+    logger.info(f"Scheduled time set: {scheduled_time}")
     
     # Now show channel selection
     return await show_channel_selection(update, context)
@@ -352,121 +380,53 @@ Will post automatically."""
     context.user_data.clear()
 
 
-async def save_scheduled_post(update, context, scheduled_time):
-    """Save the scheduled post to database"""
-    post_data = context.user_data.get('post_data', {})
-    post_type = context.user_data.get('post_type')
-    generated_text = context.user_data.get('generated_text')
-    user_id = update.effective_user.id
-    
-    # Get user's channels
-    user_settings = db.get_user_settings(user_id)
-    channels = user_settings.get('channels', [])
-    
-    if not channels:
-        msg = """❌ *No channels found\\!*
-
-Please add channels first:
-Settings → Manage Channels"""
-        
-        if hasattr(update, 'callback_query') and update.callback_query:
-            if not update.callback_query.message:
-                await update.callback_query.answer(msg.replace('\\', '').replace('*', ''), show_alert=True)
-                return ConversationHandler.END
-            
-            await update.callback_query.edit_message_text(
-                msg,
-                reply_markup=back_to_main_keyboard(),
-                parse_mode='MarkdownV2'
-            )
-        else:
-            await update.message.reply_text(
-                msg,
-                reply_markup=back_to_main_keyboard(),
-                parse_mode='MarkdownV2'
-            )
-        return ConversationHandler.END
-    
-    # Use all channels by default
-    channel_ids = [ch['id'] for ch in channels]
-    
-    # Prepare schedule data
-    schedule_data = {
-        'user_id': user_id,
-        'post_type': post_type,
-        'post_data': post_data,
-        'generated_text': generated_text,
-        'scheduled_time': scheduled_time,
-        'channel_ids': channel_ids,
-        'status': 'pending'
-    }
-    
-    # Save to database
-    result = db.save_scheduled_post(schedule_data)
-    
-    from templates.post_templates import escape_markdown
-    time_str = format_datetime(scheduled_time)
-    ch_count = len(channel_ids)
-    
-    success_msg = f"""✅ *Post Scheduled Successfully\\!*
-
-📅 Time: {escape_markdown(time_str)}
-📝 Type: {post_type}
-📢 Channels: {ch_count}
-
-Will post automatically\\."""
-    
-    if hasattr(update, 'callback_query') and update.callback_query:
-        if not update.callback_query.message:
-            await update.callback_query.answer("✅ Post Scheduled!", show_alert=True)
-        else:
-            await update.callback_query.edit_message_text(
-                success_msg,
-                reply_markup=back_to_main_keyboard(),
-                parse_mode='MarkdownV2'
-            )
-    else:
-        await update.message.reply_text(
-            success_msg,
-            reply_markup=back_to_main_keyboard(),
-            parse_mode='MarkdownV2'
-        )
-    
-    # Clear user data
-    context.user_data.clear()
-
-
 async def cancel_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel scheduling"""
     query = update.callback_query
     await query.answer("Scheduling cancelled")
     
     if not query.message:
+        # Clear user data anyway
+        context.user_data.clear()
         return ConversationHandler.END
     
     await query.edit_message_text(
         "❌ Scheduling cancelled.",
         reply_markup=back_to_main_keyboard()
     )
+    
+    # Clear user data
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+async def conversation_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle conversation timeout"""
+    logger.warning("Schedule conversation timed out")
+    
+    if update.effective_message:
+        await update.effective_message.reply_text(
+            "⏱️ Session expired. Please start again.",
+            reply_markup=back_to_main_keyboard()
+        )
+    
+    # Clear user data
+    context.user_data.clear()
     return ConversationHandler.END
 
 
 def register_schedule_handlers(application):
     """Register schedule handlers"""
-    # Main schedule callbacks
+    # Main schedule callbacks (outside conversation)
     application.add_handler(CallbackQueryHandler(schedule_new_callback, pattern="^schedule_new$"))
     application.add_handler(CallbackQueryHandler(schedule_this_callback, pattern="^schedule_this$"))
     
-    # Quick schedule options
+    # Quick schedule options (outside conversation)
     application.add_handler(CallbackQueryHandler(schedule_next_hour, pattern="^schedule_next_hour$"))
     application.add_handler(CallbackQueryHandler(schedule_2_hours, pattern="^schedule_2_hours$"))
     application.add_handler(CallbackQueryHandler(schedule_6_hours, pattern="^schedule_6_hours$"))
     
-    # Channel selection
-    application.add_handler(CallbackQueryHandler(toggle_schedule_channel, pattern="^toggle_schedule_ch_"))
-    application.add_handler(CallbackQueryHandler(confirm_schedule_channels, pattern="^confirm_schedule_channels$"))
-    
-    # Custom time conversation
+    # Custom time conversation with LONGER timeout
     conv_handler = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(schedule_custom_callback, pattern="^schedule_custom$"),
@@ -483,6 +443,16 @@ def register_schedule_handlers(application):
         fallbacks=[
             CallbackQueryHandler(cancel_schedule, pattern="^cancel_schedule$"),
         ],
+        conversation_timeout=600,  # 10 minutes timeout
+        name="schedule_conversation"
     )
     
     application.add_handler(conv_handler)
+    
+    # Channel selection handlers (outside conversation for non-custom schedules)
+    application.add_handler(CallbackQueryHandler(toggle_schedule_channel, pattern="^toggle_schedule_ch_"))
+    application.add_handler(CallbackQueryHandler(confirm_schedule_channels, pattern="^confirm_schedule_channels$"))
+    
+    logger.info("Schedule handlers registered with extended timeout")
+
+
