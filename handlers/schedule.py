@@ -1,13 +1,4 @@
-# 🔧 Complete Fix for Button Issues
 
-## Problem: Buttons stop working after some time
-**Cause:** ConversationHandler timeout + Missing error handling
-
----
-
-## 📁 File 1: `handlers/schedule.py` (Fixed)
-
-```python
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CallbackQueryHandler, MessageHandler, filters, ConversationHandler
 from database import db
@@ -454,5 +445,6 @@ def register_schedule_handlers(application):
     application.add_handler(CallbackQueryHandler(confirm_schedule_channels, pattern="^confirm_schedule_channels$"))
     
     logger.info("Schedule handlers registered with extended timeout")
+
 
 
